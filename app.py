@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import time
 import glob
-import os
 import cv2
 import numpy as np
 import pytesseract
@@ -10,178 +9,144 @@ from PIL import Image
 from gtts import gTTS
 from googletrans import Translator
 
+# ------------------- FUNCIONES AUXILIARES -------------------
 
-text=" "
+def limpiar_audios_antiguos(dias):
+    """Elimina archivos .mp3 más antiguos que 'dias' días en la carpeta temp."""
+    mp3_files = glob.glob("temp/*.mp3")
+    if mp3_files:
+        ahora = time.time()
+        limite = dias * 86400
+        for archivo in mp3_files:
+            if os.stat(archivo).st_mtime < ahora - limite:
+                os.remove(archivo)
+                print("🧹 Archivo eliminado:", archivo)
 
-def text_to_speech(input_language, output_language, text, tld):
-    translation = translator.translate(text, src=input_language, dest=output_language)
-    trans_text = translation.text
-    tts = gTTS(trans_text, lang=output_language, tld=tld, slow=False)
+
+def texto_a_audio(idioma_entrada, idioma_salida, texto, dominio_tld):
+    """Traduce el texto y lo convierte a audio con gTTS."""
+    traduccion = traductor.translate(texto, src=idioma_entrada, dest=idioma_salida)
+    texto_traducido = traduccion.text
     try:
-        my_file_name = text[0:20]
+        nombre_archivo = texto[:20].strip().replace(" ", "_")
     except:
-        my_file_name = "audio"
-    tts.save(f"temp/{my_file_name}.mp3")
-    return my_file_name, trans_text
+        nombre_archivo = "audio"
+    ruta = f"temp/{nombre_archivo}.mp3"
+    gTTS(texto_traducido, lang=idioma_salida, tld=dominio_tld, slow=False).save(ruta)
+    return nombre_archivo, texto_traducido
 
 
+# ------------------- CONFIGURACIÓN DE LA APP -------------------
 
+st.set_page_config(page_title="Traductor OCR con Voz", page_icon="🈹")
 
-def remove_files(n):
-    mp3_files = glob.glob("temp/*mp3")
-    if len(mp3_files) != 0:
-        now = time.time()
-        n_days = n * 86400
-        for f in mp3_files:
-            if os.stat(f).st_mtime < now - n_days:
-                os.remove(f)
-                print("Deleted ", f)
+st.title("🈹 Traductor con Reconocimiento Óptico y Voz")
+st.markdown("Sube una imagen o toma una foto, extrae el texto, tradúcelo y escúchalo al instante 🎧")
 
+# Crear carpeta temporal si no existe
+os.makedirs("temp", exist_ok=True)
+limpiar_audios_antiguos(7)
 
-remove_files(7)
-  
+# ------------------- FUENTE DE IMAGEN -------------------
 
+st.subheader("📸 Fuente de la imagen")
+usar_camara = st.checkbox("Usar cámara en lugar de cargar archivo")
 
+if usar_camara:
+    imagen_capturada = st.camera_input("Toma una foto para analizar")
+else:
+    imagen_capturada = None
 
-st.title("Reconocimiento Óptico de Caracteres")
-st.subheader("Elige la fuente de la imágen, esta puede venir de la cámara o cargando un archivo")
-
-cam_ = st.checkbox("Usar Cámara")
-
-if cam_ :
-   img_file_buffer = st.camera_input("Toma una Foto")
-else :
-   img_file_buffer = None
-   
+# Filtro solo para cámara
 with st.sidebar:
-      st.subheader("Procesamiento para Cámara")
-      filtro = st.radio("Filtro para imagen con cámara",('Sí', 'No'))
+    st.header("⚙️ Configuración de imagen")
+    filtro_camara = st.radio("¿Aplicar filtro de inversión?", ("Sí", "No"))
 
-bg_image = st.file_uploader("Cargar Imagen:", type=["png", "jpg"])
-if bg_image is not None:
-    uploaded_file=bg_image
-    st.image(uploaded_file, caption='Imagen cargada.', use_container_width=True)
+# ------------------- CARGA DE IMAGEN -------------------
+
+imagen_cargada = st.file_uploader("O carga una imagen (PNG/JPG):", type=["png", "jpg"])
+
+texto_extraido = ""
+
+if imagen_cargada is not None:
+    st.image(imagen_cargada, caption="Imagen cargada correctamente ✅", use_container_width=True)
     
-    # Guardar la imagen en el sistema de archivos
-    with open(uploaded_file.name, 'wb') as f:
-        f.write(uploaded_file.read())
-    
-    st.success(f"Imagen guardada como {uploaded_file.name}")
-    img_cv = cv2.imread(f'{uploaded_file.name}')
+    # Guardar y procesar
+    with open(imagen_cargada.name, 'wb') as f:
+        f.write(imagen_cargada.read())
+
+    img_cv = cv2.imread(imagen_cargada.name)
     img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
-    text= pytesseract.image_to_string(img_rgb)
-st.write(text)  
-    
-      
-if img_file_buffer is not None:
-    # To read image file buffer with OpenCV:
-    bytes_data = img_file_buffer.getvalue()
-    cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+    texto_extraido = pytesseract.image_to_string(img_rgb)
+    st.success("Texto detectado desde imagen cargada:")
+    st.write(texto_extraido)
 
+elif imagen_capturada is not None:
+    bytes_imagen = imagen_capturada.getvalue()
+    img_cv = cv2.imdecode(np.frombuffer(bytes_imagen, np.uint8), cv2.IMREAD_COLOR)
     
-    if filtro == 'Con Filtro':
-         cv2_img=cv2.bitwise_not(cv2_img)
-    else:
-        cv2_img= cv2_img
-          
-        
-    img_rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
-    text=pytesseract.image_to_string(img_rgb) 
-    st.write(text) 
+    if filtro_camara == "Sí":
+        img_cv = cv2.bitwise_not(img_cv)
+
+    img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+    texto_extraido = pytesseract.image_to_string(img_rgb)
+    st.success("Texto detectado desde cámara:")
+    st.write(texto_extraido)
+
+# ------------------- CONFIGURACIÓN DE TRADUCCIÓN -------------------
 
 with st.sidebar:
-      st.subheader("Parámetros de traducción")
-      
-      try:
-          os.mkdir("temp")
-      except:
-          pass
-      #st.title("Text to speech")
-      translator = Translator()
-      
-      #text = st.text_input("Enter text")
-      in_lang = st.selectbox(
-          "Seleccione el lenguaje de entrada",
-          ("Ingles", "Español", "Bengali", "koreano", "Mandarin", "Japones"),
-      )
-      if in_lang == "Ingles":
-          input_language = "en"
-      elif in_lang == "Español":
-          input_language = "es"
-      elif in_lang == "Bengali":
-          input_language = "bn"
-      elif in_lang == "koreano":
-          input_language = "ko"
-      elif in_lang == "Mandarin":
-          input_language = "zh-cn"
-      elif in_lang == "Japones":
-          input_language = "ja"
-      
-      out_lang = st.selectbox(
-          "Select your output language",
-          ("Ingles", "Español", "Bengali", "koreano", "Mandarin", "Japones"),
-      )
-      if out_lang == "Ingles":
-          output_language = "en"
-      elif out_lang == "Español":
-          output_language = "es"
-      elif out_lang == "Bengali":
-          output_language = "bn"
-      elif out_lang == "koreano":
-          output_language = "ko"
-      elif out_lang == "Chinese":
-          output_language = "zh-cn"
-      elif out_lang == "Japones":
-          output_language = "ja"
-      
-      english_accent = st.selectbox(
-          "Seleccione el acento",
-          (
-              "Default",
-              "India",
-              "United Kingdom",
-              "United States",
-              "Canada",
-              "Australia",
-              "Ireland",
-              "South Africa",
-          ),
-      )
-      
-      if english_accent == "Default":
-          tld = "com"
-      elif english_accent == "India":
-          tld = "co.in"
-      
-      elif english_accent == "United Kingdom":
-          tld = "co.uk"
-      elif english_accent == "United States":
-          tld = "com"
-      elif english_accent == "Canada":
-          tld = "ca"
-      elif english_accent == "Australia":
-          tld = "com.au"
-      elif english_accent == "Ireland":
-          tld = "ie"
-      elif english_accent == "South Africa":
-          tld = "co.za"
+    st.header("🌍 Parámetros de traducción y voz")
+    traductor = Translator()
 
-      display_output_text = st.checkbox("Mostrar texto")
+    idioma_entrada = st.selectbox("Lenguaje de entrada", ("Inglés", "Español", "Bengalí", "Coreano", "Mandarín", "Japonés"))
+    idioma_salida = st.selectbox("Lenguaje de salida", ("Inglés", "Español", "Bengalí", "Coreano", "Mandarín", "Japonés"))
 
-      if st.button("convert"):
-          result, output_text = text_to_speech(input_language, output_language, text, tld)
-          audio_file = open(f"temp/{result}.mp3", "rb")
-          audio_bytes = audio_file.read()
-          st.markdown(f"## Tu audio:")
-          st.audio(audio_bytes, format="audio/mp3", start_time=0)
-      
-          if display_output_text:
-              st.markdown(f"## Texto de salida:")
-              st.write(f" {output_text}")
+    # Mapeo de idiomas
+    codigos_idioma = {
+        "Inglés": "en",
+        "Español": "es",
+        "Bengalí": "bn",
+        "Coreano": "ko",
+        "Mandarín": "zh-cn",
+        "Japonés": "ja",
+    }
 
+    input_lang = codigos_idioma[idioma_entrada]
+    output_lang = codigos_idioma[idioma_salida]
 
+    acento = st.selectbox(
+        "Acento del inglés (si aplica):",
+        ("Por defecto", "India", "Reino Unido", "EE.UU.", "Canadá", "Australia", "Irlanda", "Sudáfrica")
+    )
 
+    acentos_tld = {
+        "Por defecto": "com",
+        "India": "co.in",
+        "Reino Unido": "co.uk",
+        "EE.UU.": "com",
+        "Canadá": "ca",
+        "Australia": "com.au",
+        "Irlanda": "ie",
+        "Sudáfrica": "co.za",
+    }
+    dominio_tld = acentos_tld[acento]
 
- 
-    
+    mostrar_texto = st.checkbox("Mostrar texto traducido")
+    traducir_y_voz = st.button("🔊 Traducir y reproducir audio")
+
+# ------------------- GENERACIÓN DE AUDIO -------------------
+
+if traducir_y_voz and texto_extraido.strip():
+    archivo, texto_traducido = texto_a_audio(input_lang, output_lang, texto_extraido, dominio_tld)
+
+    # Mostrar resultado
+    st.subheader("🎧 Resultado del audio:")
+    with open(f"temp/{archivo}.mp3", "rb") as audio_file:
+        st.audio(audio_file.read(), format="audio/mp3")
+
+    if mostrar_texto:
+        st.subheader("📜 Texto traducido:")
+        st.write(texto_traducido)
+
     
